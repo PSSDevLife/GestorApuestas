@@ -12,6 +12,14 @@ let authState = {
     user: null
 };
 
+let driveState = {
+    tokenClient: null,
+    accessToken: null,
+    fileId: null
+};
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+
 // ====== INITIALIZATION ======
 function init() {
     loadData();
@@ -27,15 +35,56 @@ function getStorageKey(base) {
     return `${base}_guest`;
 }
 
+function checkDriveToken() {
+    const saved = localStorage.getItem('bt_gdrive_token');
+    if (saved) {
+        const data = JSON.parse(saved);
+        if (Date.now() < data.expires) {
+            driveState.accessToken = data.token;
+            if (window.gapi) {
+                gapi.load('client', async () => {
+                    await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+                    document.getElementById('gdrive-status').style.color = "var(--success)";
+                    syncWithDrive();
+                });
+            }
+            return true;
+        } else {
+            localStorage.removeItem('bt_gdrive_token');
+        }
+    }
+    return false;
+}
+
 function loadData() {
     const activeUser = localStorage.getItem('bt_active_user');
+    const isGuest = localStorage.getItem('bt_guest_mode') === 'true';
+
     if (activeUser) {
         authState.user = JSON.parse(activeUser);
         updateUserProfileUI();
         document.getElementById('btn-google-logout').style.display = 'flex';
+        document.getElementById('btn-migrate-account').style.display = 'none';
+        document.getElementById('gdrive-status').style.display = 'inline-block';
+        hideLoginScreen();
+
+        if (!checkDriveToken() && window.google) {
+            document.getElementById('gdrive-status').style.color = "var(--text-muted)";
+            document.getElementById('gdrive-status').title = "Nube desconectada. Clica para autorizar.";
+        }
+    } else if (isGuest) {
+        authState.user = null;
+        updateUserProfileUI();
+        document.getElementById('btn-google-logout').style.display = 'flex';
+        document.getElementById('btn-migrate-account').style.display = 'flex';
+        document.getElementById('gdrive-status').style.display = 'none';
         hideLoginScreen();
     } else {
+        authState.user = null;
         updateUserProfileUI();
+        document.getElementById('btn-google-logout').style.display = 'none';
+        document.getElementById('btn-migrate-account').style.display = 'none';
+        document.getElementById('gdrive-status').style.display = 'none';
         showLoginScreen();
     }
 
@@ -62,6 +111,10 @@ function saveData() {
         localStorage.setItem(getStorageKey('bt_initialBankroll'), state.initialBankroll);
     }
     localStorage.setItem(getStorageKey('bt_bets'), JSON.stringify(state.bets));
+
+    if (driveState.accessToken) {
+        uploadToDrive();
+    }
 }
 
 function setupDate() {
@@ -349,9 +402,12 @@ window.changeBetStatus = function (id, newStatus) {
 };
 
 function exportCSV() {
-    if (state.bets.length === 0) { alert("No hay apuestas para exportar."); return; }
+    if (state.bets.length === 0 && state.initialBankroll === null) { alert("No hay datos para exportar."); return; }
 
     let csvContent = "data:text/csv;charset=utf-8,";
+    if (state.initialBankroll !== null) {
+        csvContent += `#BANKROLL_INICIAL=${state.initialBankroll}\n`;
+    }
     csvContent += "ID,Fecha,Partido,Tipo,Casa,Cuota,Stake,Estado\n";
 
     state.bets.forEach(bet => {
@@ -376,11 +432,20 @@ function importCSV(e) {
     reader.onload = function (event) {
         const lines = event.target.result.split("\n");
         let newBets = [];
+        let importedBankroll = null;
 
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            if (line.startsWith('#BANKROLL_INICIAL=')) {
+                importedBankroll = parseFloat(line.split('=')[1]);
+                continue;
+            }
+            if (line.startsWith('ID,Fecha')) continue;
+
             const row = []; let buffer = ''; let inQuotes = false;
-            for (let c of lines[i]) {
+            for (let c of line) {
                 if (c === '"') inQuotes = !inQuotes;
                 else if (c === ',' && !inQuotes) { row.push(buffer); buffer = ''; }
                 else buffer += c;
@@ -412,12 +477,19 @@ function importCSV(e) {
             }
         }
 
+        if (importedBankroll !== null) {
+            state.initialBankroll = importedBankroll;
+            document.getElementById('initial-bankroll').value = importedBankroll;
+        }
+
         if (newBets.length > 0) {
             state.bets = [...state.bets, ...newBets];
             state.bets = Array.from(new Map(state.bets.map(item => [item.id, item])).values());
-            saveData(); renderAll();
-            alert(`Importadas ${newBets.length} apuestas exitosamente.`);
         }
+        
+        saveData();
+        renderAll();
+        alert(`Importación completada con éxito.`);
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -495,11 +567,10 @@ function hideLoginScreen() {
 }
 
 function loginAsGuest() {
-    authState.user = null;
+    window.isMigrating = false;
+    document.querySelector('.login-subtitle').textContent = "Inicia sesión para gestionar tus pronósticos y Bankroll";
     localStorage.removeItem('bt_active_user');
-    updateUserProfileUI();
-    document.getElementById('btn-google-logout').style.display = 'none';
-    hideLoginScreen();
+    localStorage.setItem('bt_guest_mode', 'true');
     loadData();
     renderAll();
 }
@@ -522,9 +593,33 @@ function handleCredentialResponse(response) {
     };
 
     localStorage.setItem('bt_active_user', JSON.stringify(authState.user));
-    document.getElementById('btn-google-logout').style.display = 'flex';
+    localStorage.removeItem('bt_guest_mode');
 
-    hideLoginScreen();
+    if (window.isMigrating) {
+        window.isMigrating = false;
+        document.querySelector('.login-subtitle').textContent = "Inicia sesión para gestionar tus pronósticos y Bankroll";
+
+        const targetBetsRaw = localStorage.getItem(getStorageKey('bt_bets'));
+        let targetBets = targetBetsRaw ? JSON.parse(targetBetsRaw) : [];
+
+        const localMap = new Map(targetBets.map(b => [b.id, b]));
+        state.bets.forEach(b => localMap.set(b.id, b));
+        state.bets = Array.from(localMap.values());
+
+        if (state.initialBankroll !== null) {
+            localStorage.setItem(getStorageKey('bt_initialBankroll'), state.initialBankroll);
+        }
+        localStorage.setItem(getStorageKey('bt_bets'), JSON.stringify(state.bets));
+
+        alert(`¡Tus apuestas se han vinculado a ${authState.user.email} con éxito! ✅`);
+
+        loadData();
+        renderAll();
+
+        if (window.gapi) requestDriveAccess();
+        return;
+    }
+
     alert(`Sesión iniciada como ${authState.user.email} ✅`);
 
     loadData();
@@ -547,16 +642,133 @@ function renderGoogleButton() {
 }
 
 function logoutGoogle() {
+    window.isMigrating = false;
+    document.querySelector('.login-subtitle').textContent = "Inicia sesión para gestionar tus pronósticos y Bankroll";
     if (window.google) google.accounts.id.disableAutoSelect();
-    authState.user = null;
     localStorage.removeItem('bt_active_user');
-    document.getElementById('btn-google-logout').style.display = 'none';
-    updateUserProfileUI();
-    showLoginScreen();
+    localStorage.removeItem('bt_guest_mode');
+    localStorage.removeItem('bt_gdrive_token');
+    driveState.accessToken = null;
+    driveState.fileId = null;
 
     state.bets = [];
     state.initialBankroll = null;
+
+    loadData();
     renderAll();
+}
+
+// ====== GOOGLE DRIVE SYNC =====
+function requestDriveAccess() {
+    if (!window.gapi) return;
+    document.getElementById('gdrive-status').style.color = "var(--warning)";
+    gapi.load('client', async () => {
+        await gapi.client.init({
+            discoveryDocs: [DISCOVERY_DOC],
+        });
+
+        driveState.tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: SCOPES,
+            hint: authState.user ? authState.user.email : '',
+            callback: async (tokenResponse) => {
+                if (tokenResponse.error !== undefined) {
+                    console.error(tokenResponse.error);
+                    document.getElementById('gdrive-status').style.color = "var(--danger)";
+                    document.getElementById('gdrive-status').title = "Error de autorización";
+                    return;
+                }
+                driveState.accessToken = tokenResponse.access_token;
+                localStorage.setItem('bt_gdrive_token', JSON.stringify({
+                    token: tokenResponse.access_token,
+                    expires: Date.now() + 3500000
+                }));
+                document.getElementById('gdrive-status').style.color = "var(--success)";
+                await syncWithDrive();
+            },
+        });
+
+        driveState.tokenClient.requestAccessToken();
+    });
+}
+
+async function syncWithDrive() {
+    if (!driveState.accessToken) return;
+    document.getElementById('gdrive-status').style.color = "var(--warning)";
+    try {
+        const response = await gapi.client.drive.files.list({
+            q: "name='bettracker_backup.json' and trashed=false",
+            fields: 'files(id, name)',
+            spaces: 'drive'
+        });
+
+        const files = response.result.files;
+        if (files && files.length > 0) {
+            driveState.fileId = files[0].id;
+            const fetchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${driveState.fileId}?alt=media`, {
+                headers: { 'Authorization': 'Bearer ' + driveState.accessToken }
+            });
+            const cloudData = await fetchRes.json();
+
+            if (cloudData && Array.isArray(cloudData.bets)) {
+                const localMap = new Map(state.bets.map(b => [b.id, b]));
+                cloudData.bets.forEach(b => localMap.set(b.id, b));
+                state.bets = Array.from(localMap.values());
+                if (cloudData.initialBankroll) state.initialBankroll = cloudData.initialBankroll;
+
+                if (state.initialBankroll !== null) {
+                    localStorage.setItem(getStorageKey('bt_initialBankroll'), state.initialBankroll);
+                }
+                localStorage.setItem(getStorageKey('bt_bets'), JSON.stringify(state.bets));
+                renderAll();
+
+                await uploadToDrive();
+            }
+        } else {
+            await uploadToDrive();
+        }
+        document.getElementById('gdrive-status').style.color = "var(--success)";
+        document.getElementById('gdrive-status').title = "Sincronizado con Drive";
+    } catch (e) {
+        console.error(e);
+        document.getElementById('gdrive-status').style.color = "var(--danger)";
+        document.getElementById('gdrive-status').title = "Error al sincronizar";
+    }
+}
+
+async function uploadToDrive() {
+    if (!driveState.accessToken) return;
+    document.getElementById('gdrive-status').style.color = "var(--warning)";
+
+    const fileContent = JSON.stringify({ initialBankroll: state.initialBankroll, bets: state.bets });
+    const file = new Blob([fileContent], { type: 'application/json' });
+    const metadata = { 'name': 'bettracker_backup.json', 'mimeType': 'application/json' };
+
+    let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+    let method = 'POST';
+    if (driveState.fileId) {
+        url = `https://www.googleapis.com/upload/drive/v3/files/${driveState.fileId}?uploadType=multipart`;
+        method = 'PATCH';
+    }
+
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', file);
+
+    try {
+        const res = await fetch(url, {
+            method: method,
+            headers: new Headers({ 'Authorization': 'Bearer ' + driveState.accessToken }),
+            body: form
+        });
+        const data = await res.json();
+        if (!driveState.fileId) driveState.fileId = data.id;
+        document.getElementById('gdrive-status').style.color = "var(--success)";
+        document.getElementById('gdrive-status').title = "Guardado en la Nube";
+    } catch (err) {
+        console.error("Upload error", err);
+        document.getElementById('gdrive-status').style.color = "var(--danger)";
+    }
 }
 
 function updateUserProfileUI() {
@@ -573,6 +785,12 @@ function updateUserProfileUI() {
 
 // ====== EVENT LISTENERS ======
 function setupEventListeners() {
+    document.getElementById('btn-migrate-account').addEventListener('click', () => {
+        window.isMigrating = true;
+        document.querySelector('.login-subtitle').textContent = "Inicia sesión de Google para migrar tus datos de Invitado.";
+        showLoginScreen();
+    });
+    document.getElementById('gdrive-status').addEventListener('click', requestDriveAccess);
     document.getElementById('btn-guest-login').addEventListener('click', loginAsGuest);
     document.getElementById('btn-google-logout').addEventListener('click', logoutGoogle);
     document.getElementById('btn-save-bankroll').addEventListener('click', saveBankroll);
