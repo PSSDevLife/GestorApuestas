@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Bankroll Pro</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-card">
+            <div class="login-logo">
+                <i class="fa-solid fa-chart-line"></i> BetTracker Pro
+            </div>
+            <p class="login-subtitle">Inicia sesión para gestionar tus pronósticos y Bankroll</p>
+            
+            <div class="login-actions">
+                <div id="btn-google-login-container"></div>
+                <div class="login-divider"><span>O</span></div>
+                <button id="btn-guest-login" class="btn btn-outline btn-block">
+                    <i class="fa-solid fa-user"></i> Continuar como Invitado
+                </button>
+            </div>
+            <p style="margin-top: 1.5rem; font-size: 0.75rem; color: var(--text-muted);">
+                Nota: Para el Login de Google, define tu <code>GOOGLE_CLIENT_ID</code> en el código de <code>app.js</code>.
+            </p>
+        </div>
+    </div>
+
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i class="fa-solid fa-chart-line"></i> BetTracker Pro
+        </div>
+        <div class="nav-tabs">
+            <button class="tab-btn active" data-tab="tab-dashboard"><i class="fa-solid fa-house"></i> Dashboard</button>
+            <button class="tab-btn" data-tab="tab-stats"><i class="fa-solid fa-chart-pie"></i> Estadísticas</button>
+            <button class="tab-btn" data-tab="tab-config"><i class="fa-solid fa-gear"></i> Ajustes</button>
+        </div>
+        <div class="nav-actions" style="display: flex; align-items: center; gap: 1.5rem;">
+            <div id="user-profile" class="user-profile">
+                <span style="font-size: 0.9rem; color: var(--text-muted);"><i class="fa-solid fa-user"></i> Invitado</span>
+            </div>
+            <button id="btn-google-logout" class="btn btn-outline" style="display: none; padding: 0.4rem 0.8rem; font-size: 0.85rem; color: var(--danger); border-color: var(--danger);">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Salir
+            </button>
+            <button id="btn-open-modal" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Añadir Apuesta</button>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="main-content">
+        <!-- TAB: DASHBOARD -->
+        <section id="tab-dashboard" class="tab-content active">
+            <!-- Metrics Cards -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-icon bankroll-icon"><i class="fa-solid fa-wallet"></i></div>
+                    <div class="metric-info">
+                        <span class="metric-label">Bankroll Disponible</span>
+                        <h2 id="metric-bankroll">0.00</h2>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon pnl-icon"><i class="fa-solid fa-money-bill-trend-up"></i></div>
+                    <div class="metric-info">
+                        <span class="metric-label">Beneficio Total</span>
+                        <h2 id="metric-pnl">0.00</h2>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon yield-icon"><i class="fa-solid fa-chart-pie"></i></div>
+                    <div class="metric-info">
+                        <span class="metric-label">Yield (ROI)</span>
+                        <h2 id="metric-yield">0.00%</h2>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon hitrate-icon"><i class="fa-solid fa-bullseye"></i></div>
+                    <div class="metric-info">
+                        <span class="metric-label">Hit Rate</span>
+                        <h2 id="metric-hitrate">0.00%</h2>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Section -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Historial de Apuestas</h2>
+                    <div class="filters-row">
+                        <div class="filter-group">
+                            <label>Desde:</label>
+                            <input type="date" id="filter-date-from">
+                        </div>
+                        <div class="filter-group">
+                            <label>Hasta:</label>
+                            <input type="date" id="filter-date-to">
+                        </div>
+                        <div class="filter-group">
+                            <label>Estado:</label>
+                            <select id="filter-status">
+                                <option value="Todas">Todas</option>
+                                <option value="Pendiente" selected>Pendientes</option>
+                                <option value="Ganada">Ganadas</option>
+                                <option value="Perdida">Perdidas</option>
+                                <option value="Nula">Nulas</option>
+                            </select>
+                        </div>
+                        <button id="btn-clear-filters" class="btn btn-outline" title="Limpiar Filtros"><i class="fa-solid fa-eraser"></i></button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table id="bets-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Partido</th>
+                                <th>Tipo</th>
+                                <th>Casa</th>
+                                <th>Cuota</th>
+                                <th>Stake</th>
+                                <th>Estado</th>
+                                <th>PnL</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bets-body">
+                            <!-- JS injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: ESTADÍSTICAS -->
+        <section id="tab-stats" class="tab-content">
+            <div class="panel" style="margin-bottom: 2rem;">
+                <h2>Evolución del Bankroll</h2>
+                <div class="chart-container">
+                    <canvas id="bankrollChart"></canvas>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <!-- Ganancias por Mes -->
+                <div class="panel">
+                    <h2>Rendimiento Mensual</h2>
+                    <table class="stats-table">
+                        <thead><tr><th>Mes</th><th>Apuestas</th><th>PnL</th><th>Yield</th></tr></thead>
+                        <tbody id="stats-monthly-body"></tbody>
+                    </table>
+                </div>
+
+                <!-- Ganancias por Tipo -->
+                <div class="panel">
+                    <h2>Por Tipo Mercado</h2>
+                    <table class="stats-table">
+                        <thead><tr><th>Tipo</th><th>Apuestas</th><th>PnL</th><th>Yield</th></tr></thead>
+                        <tbody id="stats-type-body"></tbody>
+                    </table>
+                </div>
+                
+                 <!-- Ganancias por Casa -->
+                <div class="panel">
+                    <h2>Por Casa Apuestas</h2>
+                    <table class="stats-table">
+                        <thead><tr><th>Casa</th><th>Apuestas</th><th>PnL</th><th>Yield</th></tr></thead>
+                        <tbody id="stats-bookie-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: CONFIGURACIÓN & DATOS -->
+        <section id="tab-config" class="tab-content">
+            <div class="panels-grid">
+                <div class="panel">
+                    <h2>Configuración Inicial</h2>
+                    <div class="form-control">
+                        <label>Bankroll Inicial (€)</label>
+                        <div class="input-group">
+                            <input type="number" id="initial-bankroll" placeholder="Ej: 1000" step="0.01">
+                            <button id="btn-save-bankroll" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <h2>Copias de Seguridad (Local CSV)</h2>
+                    <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">Exporta tu historial como CSV para guardarlo de manera offline.</p>
+                    <div class="flex-buttons-row">
+                        <button id="btn-export-csv" class="btn btn-outline"><i class="fa-solid fa-download"></i> Exportar CSV</button>
+                        <label for="input-import-csv" class="btn btn-outline cursor-pointer">
+                            <i class="fa-solid fa-upload"></i> Importar CSV
+                        </label>
+                        <input type="file" id="input-import-csv" accept=".csv" style="display: none;">
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal Añadir Apuesta -->
+    <div id="bet-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Añadir Nueva Apuesta</h2>
+                <button class="close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="ocr-section">
+                <label for="bet-image-upload" class="btn btn-outline btn-block ocr-btn">
+                    <i class="fa-solid fa-camera"></i> Escanear Ticket (OCR)
+                </label>
+                <input type="file" id="bet-image-upload" accept="image/*" style="display: none;">
+                <div id="ocr-loading" style="display: none; text-align:center; font-size: 0.85rem; color: var(--primary); margin-top: 0.5rem;">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Procesando imagen...
+                </div>
+            </div>
+
+            <form id="bet-form">
+                <div class="form-row">
+                    <div class="form-control">
+                        <label for="bet-date">Fecha</label>
+                        <input type="date" id="bet-date" required>
+                    </div>
+                    <div class="form-control">
+                        <label for="bet-status">Estado</label>
+                        <select id="bet-status" required>
+                            <option value="Pendiente">Pendiente</option>
+                            <option value="Ganada">Ganada</option>
+                            <option value="Perdida">Perdida</option>
+                            <option value="Nula">Nula / Void</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-control">
+                    <label for="bet-match">Partido / Evento</label>
+                    <input type="text" id="bet-match" placeholder="Ej: R. Madrid vs Barcelona" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-control">
+                        <label for="bet-type">Mercado / Tipo</label>
+                        <select id="bet-type" required>
+                            <option value="Match Odds">Match Odds (1X2)</option>
+                            <option value="Córners">Córners</option>
+                            <option value="Tarjetas">Tarjetas</option>
+                            <option value="Goles">Goles</option>
+                            <option value="Hándicap">Hándicap</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+                    <div class="form-control">
+                        <label for="bet-bookie">Casa de Apuestas</label>
+                        <select id="bet-bookie" required>
+                            <option value="Bet365">Bet365</option>
+                            <option value="William Hill">William Hill</option>
+                            <option value="Bwin">Bwin</option>
+                            <option value="Betfair">Betfair</option>
+                            <option value="1xBet">1xBet</option>
+                            <option value="Pinnacle">Pinnacle</option>
+                            <option value="Otras">Otras</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-control">
+                        <label for="bet-odds">Cuota</label>
+                        <input type="number" id="bet-odds" step="0.01" min="1.01" placeholder="1.80" required>
+                    </div>
+                    <div class="form-control">
+                        <label for="bet-stake-level">Nivel Stake</label>
+                        <select id="bet-stake-level">
+                            <option value="">Manual / Otro</option>
+                            <option value="1">Stake 1 (1%)</option>
+                            <option value="2">Stake 2 (2%)</option>
+                            <option value="3">Stake 3 (3%)</option>
+                            <option value="4">Stake 4 (4%)</option>
+                            <option value="5">Stake 5 (5%)</option>
+                            <option value="6">Stake 6 (6%)</option>
+                            <option value="7">Stake 7 (7%)</option>
+                            <option value="8">Stake 8 (8%)</option>
+                            <option value="9">Stake 9 (9%)</option>
+                            <option value="10">Stake 10 (10%)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-control">
+                    <label for="bet-stake">Cantidad Apostada (€)</label>
+                    <input type="number" id="bet-stake" step="0.01" min="0.1" placeholder="10" required>
+                </div>
+                
+                <button type="submit" class="btn btn-success btn-block" style="margin-top: 1.5rem; padding: 0.8rem;"><i class="fa-solid fa-save"></i> Guardar Apuesta</button>
+            </form>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
