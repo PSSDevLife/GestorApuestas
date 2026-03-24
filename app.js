@@ -35,28 +35,107 @@ function getStorageKey(base) {
     return `${base}_guest`;
 }
 
+function getDriveTokenKey() {
+    return authState.user ? `bt_gdrive_token_${authState.user.email}` : 'bt_gdrive_token_guest';
+}
+
 function checkDriveToken() {
-    const saved = localStorage.getItem('bt_gdrive_token');
+    const saved = localStorage.getItem(getDriveTokenKey());
     if (saved) {
         const data = JSON.parse(saved);
         if (Date.now() < data.expires) {
+            // Token still valid - restore and sync
             driveState.accessToken = data.token;
             if (window.gapi) {
                 gapi.load('client', async () => {
                     await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
-                    document.getElementById('gdrive-status').style.color = "var(--success)";
+                    document.getElementById('gdrive-status').style.color = 'var(--success)';
+                    document.getElementById('gdrive-status').title = 'Sincronizando...';
                     syncWithDrive();
                 });
             }
             return true;
         } else {
-            localStorage.removeItem('bt_gdrive_token');
+            // Token expired - try silent refresh
+            localStorage.removeItem(getDriveTokenKey());
+            silentDriveRefresh();
+            return true;
         }
     }
     return false;
 }
 
+function silentDriveRefresh() {
+    if (!window.gapi || !window.google || !authState.user) return;
+    const statusEl = document.getElementById('gdrive-status');
+
+    // 1. Try cached token first (fastest path)
+    const saved = localStorage.getItem(getDriveTokenKey());
+    if (saved) {
+        const data = JSON.parse(saved);
+        if (Date.now() < data.expires) {
+            driveState.accessToken = data.token;
+            statusEl.style.color = 'var(--success)';
+            statusEl.title = 'Sincronizado con Drive';
+            gapi.load('client', async () => {
+                await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+                syncWithDrive();
+            });
+            return;
+        } else {
+            localStorage.removeItem(getDriveTokenKey());
+        }
+    }
+
+    // 2. No cached token - try silent OAuth (no popup)
+    statusEl.style.color = 'var(--text-muted)';
+    statusEl.title = 'Reconectando nube...';
+
+    let responded = false;
+    // Timeout fallback: if Google never calls back in 4s, show the click button
+    const timeout = setTimeout(() => {
+        if (!responded) {
+            statusEl.style.color = 'var(--text-muted)';
+            statusEl.title = 'Nube desconectada. Clica para autorizar.';
+        }
+    }, 4000);
+
+    gapi.load('client', async () => {
+        await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+        const tc = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: SCOPES,
+            hint: authState.user.email,
+            prompt: '',
+            callback: async (tokenResponse) => {
+                responded = true;
+                clearTimeout(timeout);
+                if (tokenResponse.error) {
+                    statusEl.style.color = 'var(--text-muted)';
+                    statusEl.title = 'Nube desconectada. Clica para autorizar.';
+                    return;
+                }
+                driveState.accessToken = tokenResponse.access_token;
+                localStorage.setItem(getDriveTokenKey(), JSON.stringify({
+                    token: tokenResponse.access_token,
+                    expires: Date.now() + 3500000
+                }));
+                statusEl.style.color = 'var(--success)';
+                statusEl.title = 'Sincronizado con Drive';
+                await syncWithDrive();
+            }
+        });
+        tc.requestAccessToken();
+    });
+}
+
 function loadData() {
+    // Restore Theme & Font
+    const savedTheme = localStorage.getItem('bt_theme') || 'dark';
+    setTheme(savedTheme);
+    const savedFont = localStorage.getItem('bt_font') || 'Inter';
+    setFont(savedFont);
+
     const activeUser = localStorage.getItem('bt_active_user');
     const isGuest = localStorage.getItem('bt_guest_mode') === 'true';
 
@@ -68,9 +147,9 @@ function loadData() {
         document.getElementById('gdrive-status').style.display = 'inline-block';
         hideLoginScreen();
 
-        if (!checkDriveToken() && window.google) {
-            document.getElementById('gdrive-status').style.color = "var(--text-muted)";
-            document.getElementById('gdrive-status').title = "Nube desconectada. Clica para autorizar.";
+        if (window.google) {
+            // Always try silent reconnect - no popup if permission already granted
+            setTimeout(silentDriveRefresh, 800);
         }
     } else if (isGuest) {
         authState.user = null;
@@ -647,7 +726,7 @@ function logoutGoogle() {
     if (window.google) google.accounts.id.disableAutoSelect();
     localStorage.removeItem('bt_active_user');
     localStorage.removeItem('bt_guest_mode');
-    localStorage.removeItem('bt_gdrive_token');
+    // Intentionally keep Drive token so next login auto-reconnects silently
     driveState.accessToken = null;
     driveState.fileId = null;
 
@@ -679,11 +758,12 @@ function requestDriveAccess() {
                     return;
                 }
                 driveState.accessToken = tokenResponse.access_token;
-                localStorage.setItem('bt_gdrive_token', JSON.stringify({
+                localStorage.setItem(getDriveTokenKey(), JSON.stringify({
                     token: tokenResponse.access_token,
                     expires: Date.now() + 3500000
                 }));
                 document.getElementById('gdrive-status').style.color = "var(--success)";
+                document.getElementById('gdrive-status').title = "Guardado en la Nube";
                 await syncWithDrive();
             },
         });
@@ -729,10 +809,12 @@ async function syncWithDrive() {
         }
         document.getElementById('gdrive-status').style.color = "var(--success)";
         document.getElementById('gdrive-status').title = "Sincronizado con Drive";
+        updateSettingsUI(); // Refresh drive status in settings
     } catch (e) {
         console.error(e);
         document.getElementById('gdrive-status').style.color = "var(--danger)";
         document.getElementById('gdrive-status').title = "Error al sincronizar";
+        document.getElementById('drive-error-modal').classList.add('active');
     }
 }
 
@@ -768,6 +850,7 @@ async function uploadToDrive() {
     } catch (err) {
         console.error("Upload error", err);
         document.getElementById('gdrive-status').style.color = "var(--danger)";
+        document.getElementById('drive-error-modal').classList.add('active');
     }
 }
 
@@ -781,6 +864,96 @@ function updateUserProfileUI() {
     } else {
         container.innerHTML = `<span style="font-size: 0.9rem; color: var(--text-muted);"><i class="fa-solid fa-user"></i> Invitado</span>`;
     }
+    updateSettingsUI();
+}
+
+function updateSettingsUI() {
+    const accountPanel = document.getElementById('account-info-panel');
+    const drivePanel = document.getElementById('drive-info-panel');
+    if (!accountPanel || !drivePanel) return;
+
+    // Render Account Panel
+    if (authState.user) {
+        accountPanel.innerHTML = `
+            <div class="account-card-mini">
+                <img src="${authState.user.picture}" alt="Profile" referrerpolicy="no-referrer">
+                <div class="account-details">
+                    <h3>${authState.user.name}</h3>
+                    <p>${authState.user.email}</p>
+                </div>
+            </div>
+            <button class="btn btn-outline btn-block" onclick="logoutGoogle()">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar Sesión
+            </button>
+        `;
+    } else {
+        const isGuest = localStorage.getItem('bt_guest_mode') === 'true';
+        accountPanel.innerHTML = `
+            <div class="account-card-mini">
+                <div class="metric-icon" style="background:var(--bg-input); color:var(--text-muted); font-size:1.5rem;">
+                    <i class="fa-solid fa-user-secret"></i>
+                </div>
+                <div class="account-details">
+                    <h3>Modo Invitado</h3>
+                    <p>Los datos se guardan solo en este navegador.</p>
+                </div>
+            </div>
+            <div class="flex-buttons-row">
+                <button class="btn btn-primary" onclick="showLoginScreen()">
+                    <i class="fa-brands fa-google"></i> Iniciar Sesión
+                </button>
+                ${isGuest ? `
+                <button class="btn btn-outline" onclick="window.isMigrating=true; showLoginScreen();">
+                    <i class="fa-solid fa-shuffle"></i> Migrar a Google
+                </button>` : ''}
+            </div>
+        `;
+    }
+
+    // Render Drive Panel
+    if (authState.user) {
+        const isConnected = !!driveState.accessToken;
+        drivePanel.innerHTML = `
+            <div class="account-card-mini">
+                <div class="metric-icon" style="background:${isConnected ? 'var(--success-bg)' : 'var(--bg-input)'}; color:${isConnected ? 'var(--success)' : 'var(--text-muted)'}; font-size:1.5rem;">
+                    <i class="fa-solid fa-cloud"></i>
+                </div>
+                <div class="account-details">
+                    <h3>Estado: ${isConnected ? 'Conectado' : 'Desconectado'}</h3>
+                    <p>${isConnected ? 'Tus apuestas están sincronizadas en la nube.' : 'Inicia la conexión para guardar copias automáticas.'}</p>
+                </div>
+            </div>
+            <button class="btn ${isConnected ? 'btn-outline' : 'btn-primary'} btn-block" onclick="requestDriveAccess()">
+                <i class="fa-solid fa-rotate"></i> ${isConnected ? 'Forzar Reconexión' : 'Conectar con Google Drive'}
+            </button>
+        `;
+    } else {
+        drivePanel.innerHTML = `
+            <p style="color:var(--text-muted); font-size:0.9rem; text-align:center; padding:1.5rem;">
+                Inicia sesión con Google para activar la sincronización en la nube.
+            </p>
+        `;
+    }
+}
+
+function setTheme(theme) {
+    if (theme === 'light') {
+        document.body.classList.add('light-theme');
+        document.getElementById('btn-theme-light')?.classList.add('active');
+        document.getElementById('btn-theme-dark')?.classList.remove('active');
+    } else {
+        document.body.classList.remove('light-theme');
+        document.getElementById('btn-theme-dark')?.classList.add('active');
+        document.getElementById('btn-theme-light')?.classList.remove('active');
+    }
+    localStorage.setItem('bt_theme', theme);
+}
+
+function setFont(fontFamily) {
+    document.body.style.setProperty('--font-ui', fontFamily);
+    const selector = document.getElementById('font-selector');
+    if (selector) selector.value = fontFamily;
+    localStorage.setItem('bt_font', fontFamily);
 }
 
 // ====== EVENT LISTENERS ======
@@ -826,6 +999,13 @@ function setupEventListeners() {
         }
     });
 
+    // Hamburger menu toggle (mobile)
+    const hamburger = document.getElementById('nav-hamburger');
+    const navTabs = document.getElementById('nav-tabs');
+    if (hamburger && navTabs) {
+        hamburger.addEventListener('click', () => navTabs.classList.toggle('open'));
+    }
+
     // Tabs Navigation
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -834,6 +1014,9 @@ function setupEventListeners() {
 
             e.currentTarget.classList.add('active');
             document.getElementById(e.currentTarget.dataset.tab).classList.add('active');
+
+            // Auto-close mobile menu
+            if (navTabs) navTabs.classList.remove('open');
 
             if (e.currentTarget.dataset.tab === 'tab-stats' && chartInstance) {
                 chartInstance.update();

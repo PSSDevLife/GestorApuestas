@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestor de Bankroll Pro</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -39,27 +40,31 @@
         <div class="nav-brand">
             <i class="fa-solid fa-chart-line"></i> BetTracker Pro
         </div>
-        <div class="nav-tabs">
+        <div class="nav-tabs" id="nav-tabs">
             <button class="tab-btn active" data-tab="tab-dashboard"><i class="fa-solid fa-house"></i> Dashboard</button>
             <button class="tab-btn" data-tab="tab-stats"><i class="fa-solid fa-chart-pie"></i> Estadísticas</button>
             <button class="tab-btn" data-tab="tab-config"><i class="fa-solid fa-gear"></i> Ajustes</button>
         </div>
-        <div class="nav-actions" style="display: flex; align-items: center; gap: 1.5rem;">
+        <div class="nav-actions" style="display: flex; align-items: center; gap: 0.75rem;">
             <div id="user-profile" class="user-profile">
-                <span style="font-size: 0.9rem; color: var(--text-muted);"><i class="fa-solid fa-user"></i> Invitado</span>
+                <span style="font-size: 0.9rem; color: var(--text-muted);"><i class="fa-solid fa-user"></i> <span class="user-name">Invitado</span></span>
             </div>
             <button id="gdrive-status" class="btn btn-outline" style="display: none; padding: 0.4rem; border: none; font-size: 1.1rem; color: var(--text-muted);" title="Sincronización Drive Desactivada">
                 <i class="fa-solid fa-cloud"></i>
             </button>
             <button id="btn-migrate-account" class="btn btn-outline" style="display: none; padding: 0.4rem 0.8rem; font-size: 0.85rem; color: #4285F4; border-color: #4285F4;" title="Vincular cuenta con Google">
-                <i class="fa-brands fa-google"></i> Vincular
+                <i class="fa-brands fa-google"></i> <span class="user-name">Vincular</span>
             </button>
             <button id="btn-google-logout" class="btn btn-outline" style="display: none; padding: 0.4rem 0.8rem; font-size: 0.85rem; color: var(--danger); border-color: var(--danger);">
-                <i class="fa-solid fa-arrow-right-from-bracket"></i> Salir
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> <span class="user-name">Salir</span>
             </button>
-            <button id="btn-open-modal" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Añadir Apuesta</button>
+            <button id="btn-open-modal" class="btn btn-primary"><i class="fa-solid fa-plus"></i> <span class="user-name">Añadir</span></button>
+            <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+                <span></span><span></span><span></span>
+            </button>
         </div>
     </nav>
+
 
     <!-- Main Container -->
     <main class="main-content">
@@ -185,33 +190,105 @@
             </div>
         </section>
 
-        <!-- TAB: CONFIGURACIÓN & DATOS -->
+        <!-- TAB: AJUSTES -->
         <section id="tab-config" class="tab-content">
-            <div class="panels-grid">
-                <div class="panel">
-                    <h2>Configuración Inicial</h2>
-                    <div class="form-control">
-                        <label>Bankroll Inicial (€)</label>
+            <div class="settings-grid">
+
+                <!-- CUENTA -->
+                <div class="panel settings-panel">
+                    <h2><i class="fa-solid fa-circle-user" style="color:var(--primary);margin-right:0.5rem;"></i>Cuenta</h2>
+                    <div id="account-info-panel">
+                        <!-- Filled dynamically by JS -->
+                    </div>
+                </div>
+
+                <!-- SINCRONIZACIÓN EN LA NUBE -->
+                <div class="panel settings-panel">
+                    <h2><i class="fa-solid fa-cloud" style="color:var(--primary);margin-right:0.5rem;"></i>Sincronización en la Nube</h2>
+                    <div id="drive-info-panel">
+                        <!-- Filled dynamically by JS -->
+                    </div>
+                </div>
+
+                <!-- CONFIGURACIÓN INICIAL -->
+                <div class="panel settings-panel">
+                    <h2><i class="fa-solid fa-wallet" style="color:var(--primary);margin-right:0.5rem;"></i>Bankroll Inicial</h2>
+                    <p style="color:var(--text-muted);font-size:0.88rem;margin-bottom:1.1rem;">Define el capital de partida para calcular el Yield y el Stake automático.</p>
+                    <div class="form-control" style="margin-bottom:0;">
                         <div class="input-group">
                             <input type="number" id="initial-bankroll" placeholder="Ej: 1000" step="0.01">
                             <button id="btn-save-bankroll" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar</button>
                         </div>
                     </div>
                 </div>
-                <div class="panel">
-                    <h2>Copias de Seguridad (Local CSV)</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">Exporta tu historial como CSV para guardarlo de manera offline.</p>
+
+                <!-- APARIENCIA -->
+                <div class="panel settings-panel">
+                    <h2><i class="fa-solid fa-palette" style="color:var(--primary);margin-right:0.5rem;"></i>Apariencia</h2>
+
+                    <div class="form-control">
+                        <label>Tema</label>
+                        <div class="theme-toggle-row">
+                            <button class="theme-btn active" id="btn-theme-dark" onclick="setTheme('dark')">
+                                <i class="fa-solid fa-moon"></i> Oscuro
+                            </button>
+                            <button class="theme-btn" id="btn-theme-light" onclick="setTheme('light')">
+                                <i class="fa-solid fa-sun"></i> Claro
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-control" style="margin-bottom:0;">
+                        <label>Fuente de Interfaz</label>
+                        <select id="font-selector" onchange="setFont(this.value)">
+                            <option value="Inter">Inter (Por defecto)</option>
+                            <option value="'JetBrains Mono'">JetBrains Mono</option>
+                            <option value="'Roboto'">Roboto</option>
+                            <option value="'Outfit'">Outfit</option>
+                            <option value="system-ui">Sistema</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- COPIAS DE SEGURIDAD -->
+                <div class="panel settings-panel">
+                    <h2><i class="fa-solid fa-database" style="color:var(--primary);margin-right:0.5rem;"></i>Copias de Seguridad (CSV)</h2>
+                    <p style="color:var(--text-muted);font-size:0.88rem;margin-bottom:1.1rem;">Exporta o importa tu historial completo (apuestas + bankroll inicial) en formato CSV.</p>
                     <div class="flex-buttons-row">
                         <button id="btn-export-csv" class="btn btn-outline"><i class="fa-solid fa-download"></i> Exportar CSV</button>
                         <label for="input-import-csv" class="btn btn-outline cursor-pointer">
                             <i class="fa-solid fa-upload"></i> Importar CSV
                         </label>
-                        <input type="file" id="input-import-csv" accept=".csv" style="display: none;">
+                        <input type="file" id="input-import-csv" accept=".csv" style="display:none;">
                     </div>
                 </div>
+
             </div>
         </section>
     </main>
+
+    <!-- DRIVE RECONNECT MODAL -->
+    <div id="drive-error-modal" class="modal" style="z-index:2000;">
+        <div class="modal-content" style="max-width:400px;text-align:center;">
+            <div style="font-size:3rem;margin-bottom:1rem;color:var(--danger);">
+                <i class="fa-solid fa-cloud-slash"></i>
+            </div>
+            <h2 style="margin-bottom:0.75rem;">Error de sincronización</h2>
+            <p style="color:var(--text-muted);margin-bottom:2rem;font-size:0.92rem;line-height:1.6;">
+                No se ha podido conectar con Google Drive. Puede que tu sesión haya expirado o que hayas revocado el acceso.
+            </p>
+            <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="document.getElementById('drive-error-modal').classList.remove('active'); requestDriveAccess();">
+                    <i class="fa-solid fa-rotate-right"></i> Reconectar Drive
+                </button>
+                <button class="btn btn-outline" onclick="document.getElementById('drive-error-modal').classList.remove('active');">
+                    Ahora no
+                </button>
+            </div>
+        </div>
+    </div>
+
+
 
     <!-- Modal Añadir Apuesta -->
     <div id="bet-modal" class="modal">
